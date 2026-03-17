@@ -1,8 +1,8 @@
 import { storage } from "./storage";
 import { log } from "./index";
 import { notifyDataUpdate } from "./routes";
-import { CultureBot } from "./Resorce queue/cultureBot";
-import { BotCore } from "./Resorce queue/core";
+import { CultureBot } from "./bot/cultureBot";
+import { BotCore } from "./bot/core";
 
 function getStorageCapacity(level: number) {
   const cap: Record<number, number> = {
@@ -294,125 +294,23 @@ class BotManager {
 
       await humanDelay(1700, 2700);
 
-      var claimDebug = await this.page.evaluate(function() {
+      const isClaimEnabled = await this.page.evaluate(function() {
         var btn = document.querySelector("#fto_claim_button");
-        if (!btn) return { found: false, classes: "", text: "", disabled: true, visible: false };
-        var el = btn as HTMLElement;
-        return {
-          found: true,
-          classes: el.className || "",
-          text: (el.textContent || "").trim().substring(0, 50),
-          disabled: el.classList.contains("disabled"),
-          visible: el.offsetParent !== null || el.offsetHeight > 0,
-          tag: el.tagName,
-          rect: JSON.stringify(el.getBoundingClientRect())
-        };
+        if (!btn) return false;
+        return !btn.classList.contains("disabled");
       });
 
-      await this.addLog(`Claim debug: found=${claimDebug.found} disabled=${claimDebug.disabled} visible=${claimDebug.visible} classes="${claimDebug.classes}" rect=${claimDebug.rect || "?"}`, "info");
-
-      if (!claimDebug.found || claimDebug.disabled) {
-        await this.addLog("Cooldown aktywny lub przycisk nie znaleziony — nie zbieram.", "warning");
+      if (!isClaimEnabled) {
+        await this.addLog("Cooldown aktywny — nie zbieram.", "warning");
         await this.closePopup();
         this.scheduleNextCollect();
         return;
       }
 
       await humanDelay(800, 1800);
-
-      await this.addLog("Klikam ODBIERZ (metoda 1: mouse.click)...", "info");
       await this.clickRandomPoint(claimButton);
 
-      await humanDelay(1000, 2000);
-
-      var afterClick1 = await this.page.evaluate(function() {
-        var btn = document.querySelector("#fto_claim_button");
-        if (!btn) return { disabled: false, classes: "" };
-        return { disabled: btn.classList.contains("disabled"), classes: (btn as HTMLElement).className || "" };
-      });
-
-      if (afterClick1.disabled) {
-        await this.addLog("Zebrano surowce ze wszystkich wiosek (mouse.click).", "success");
-        await this.closePopup();
-        this.scheduleNextCollect();
-        return;
-      }
-
-      await this.addLog("mouse.click nie zadziałał, próbuję CDP Input.dispatchMouseEvent...", "warning");
-
-      try {
-        var el2 = await this.page.$(claimButton);
-        if (el2) {
-          var box2 = await el2.boundingBox();
-          if (box2) {
-            var cx = box2.x + box2.width / 2 + randomBetween(-2, 2);
-            var cy = box2.y + box2.height / 2 + randomBetween(-2, 2);
-
-            var cdp = await this.page.target().createCDPSession();
-            await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy });
-            await humanDelay(100, 200);
-            await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1 });
-            await humanDelay(50, 120);
-            await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1 });
-            await cdp.detach();
-          }
-        }
-      } catch (cdpErr: any) {
-        await this.addLog(`CDP błąd: ${cdpErr.message}`, "error");
-      }
-
-      await humanDelay(1000, 1500);
-
-      var afterClick2 = await this.page.evaluate(function() {
-        var btn = document.querySelector("#fto_claim_button");
-        if (!btn) return { disabled: false, classes: "" };
-        return { disabled: btn.classList.contains("disabled"), classes: (btn as HTMLElement).className || "" };
-      });
-
-      if (afterClick2.disabled) {
-        await this.addLog("Zebrano surowce (CDP click).", "success");
-        await this.closePopup();
-        this.scheduleNextCollect();
-        return;
-      }
-
-      await this.addLog("CDP nie zadziałał, próbuję page.click()...", "warning");
-
-      try {
-        await this.page.click(claimButton, { delay: randomBetween(50, 120) });
-      } catch (clickErr: any) {
-        await this.addLog(`page.click błąd: ${clickErr.message}`, "error");
-      }
-
-      await humanDelay(1000, 1500);
-
-      var afterClick3 = await this.page.evaluate(function() {
-        var btn = document.querySelector("#fto_claim_button");
-        if (!btn) return { disabled: false, classes: "" };
-        return { disabled: btn.classList.contains("disabled"), classes: (btn as HTMLElement).className || "" };
-      });
-
-      if (afterClick3.disabled) {
-        await this.addLog("Zebrano surowce (page.click).", "success");
-      } else {
-        await this.addLog("ŻADNA metoda klikania nie zadziałała! Przycisk dalej aktywny.", "error");
-
-        var pageDebug = await this.page.evaluate(function() {
-          var btn = document.querySelector("#fto_claim_button");
-          if (!btn) return "brak przycisku";
-          var el = btn as HTMLElement;
-          var parent = el.parentElement;
-          var overlay = document.elementFromPoint(
-            el.getBoundingClientRect().left + el.getBoundingClientRect().width / 2,
-            el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
-          );
-          return "btn=" + el.tagName + "." + el.className +
-            " parent=" + (parent ? parent.tagName + "." + parent.className.substring(0, 30) : "?") +
-            " overlay=" + (overlay ? overlay.tagName + "." + (overlay.className || "").substring(0, 30) + "#" + (overlay.id || "") : "?");
-        });
-        await this.addLog(`Debug overlay: ${pageDebug}`, "info");
-      }
-
+      await this.addLog("Zebrano surowce ze wszystkich wiosek.", "success");
       await this.closePopup();
       this.scheduleNextCollect();
     } catch (err: any) {
